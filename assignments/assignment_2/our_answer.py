@@ -44,6 +44,8 @@ SPAWN_POS: list[float] = [-1.0, 0.0, 0.1]  # where the robot starts, i think thi
 TARGET_POSITION: list[float] = [2.0, 0.0, 0.1]  # where it should end up, might need to be lik 5 for the olympic arena
 SIM_DURATION: float = 15.0  # seconds of simulated time per evaluation
 MODE: ViewerTypes = "launcher"  # see run_experiment() for the options
+TILT_LIMIT = 0.5        #tilt will count as tipped over
+ARRIVAL_RADIUS = 0.30   # closer than this (metres) counts as that its reached the targer
 
 HIDDEN_SIZE = 8 #For now setting the number of hidden nodes to 8
 INPUT_SIZE = 30 #Input size 30 to include more stuff
@@ -155,26 +157,29 @@ def get_core_position(data: mj.MjData) -> npt.NDArray[np.float64]:
     return np.asarray(data.qpos[0:3]).copy()
 
 
-def fitness_function(
-    initial_position: npt.NDArray[np.float64],
-    final_position: npt.NDArray[np.float64],
-) -> float:
+def fitness_function(initial_position, final_position, fell, time_to_target):
     """Score one evaluation. LOWER IS BETTER.
 
-    The plain version: how far is the robot from the target when time runs out?
-
-    `initial_position` is unused here on purpose - it is passed in because the
-    moment you want a less naive fitness you will need it. Some things worth
-    thinking about (and, ideally, comparing in your report):
-      * Distance *reduced* rather than distance remaining, so a robot that
-        starts closer is not rewarded for standing still.
-      * Penalising a robot that falls over or leaves the arena.
-      * Whether the z-axis should count at all - a robot that jumps is not
-        closer to the target in any way you care about.
-    See `ariel.simulation.tasks.targeted_locomotion` for some worked variants.
+    Three parts added together:
+      1. distance change: negative if the robot got closer to the target
+      2. speed: 0 to 1 if it reached the target (sooner = lower), 1 if it never did
+      3. fall: +10 if the robot tipped over at any point
     """
     target = np.asarray(TARGET_POSITION)
-    return float(np.linalg.norm(final_position[:2] - target[:2]))
+
+    start_dist = np.linalg.norm(initial_position[:2] - target[:2])
+    end_dist = np.linalg.norm(final_position[:2] - target[:2])
+    score = end_dist - start_dist                      # part 1
+
+    if time_to_target is not None:                     # part 2
+        score += time_to_target / SIM_DURATION
+    else:
+        score += 1.0
+
+    if fell:                                           # part 3
+        score += 10.0
+
+    return float(score)
 
 ##########################################################3
 
@@ -213,6 +218,10 @@ def run_experiment(
     mj.mj_resetData(model, data)
     mj.mj_forward(model, data)
 
+    qx0, qy0 = data.qpos[4], data.qpos[5]
+    up_z0 = 1 - 2 * (qx0**2 + qy0**2)
+    print(f"starting up_z: {up_z0:.3f}")
+
     # --- Wire up the controller -------------------------------------------- #
     # Sizes are read from the compiled model, never hardcoded - they depend on
     # the body you chose in build_robot().
@@ -220,11 +229,25 @@ def run_experiment(
     output_size = model.nu
 
     weights = genotype_to_weights(genotype, input_size, output_size)
+    log = {"fell": False, "time_to_target": None}
+    target = np.asarray(TARGET_POSITION)
 
     def control_callback(m: mj.MjModel, d: mj.MjData) -> None:
         """Compute and apply actions; MuJoCo calls this every physics step."""
         actions = nn_controller(m, d, weights)
 
+       
+
+        # Has the robot tipped over?
+        qx, qy = d.qpos[4], d.qpos[5]
+        up_z = 1 - 2 * (qx**2 + qy**2)
+        if up_z < TILT_LIMIT:
+            log["fell"] = True
+
+        # Has the robot reached the target yet? (only record the first time)
+        dist = np.linalg.norm(d.qpos[0:2] - target[0:2])
+        if log["time_to_target"] is None and dist < ARRIVAL_RADIUS:
+            log["time_to_target"] = d.time
         # DIRECT application (see the controller contract above).
         d.ctrl[:] = actions
 
@@ -270,8 +293,10 @@ def run_experiment(
 
     # --- Score -------------------------------------------------------------- #
     final_position = get_core_position(data)
-    fitness = fitness_function(initial_position, final_position)
 
+    fitness = fitness_function(
+        initial_position, final_position, log["fell"], log["time_to_target"]
+)
     console.log(f"start  : {np.round(initial_position, 3)}")
     console.log(f"end    : {np.round(final_position, 3)}")
     console.log(f"target : {np.round(TARGET_POSITION, 3)}")
