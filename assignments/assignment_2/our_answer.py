@@ -46,6 +46,7 @@ SIM_DURATION: float = 15.0  # seconds of simulated time per evaluation
 MODE: ViewerTypes = "launcher"  # see run_experiment() for the options
 
 HIDDEN_SIZE = 8 #For now setting the number of hidden nodes to 8
+INPUT_SIZE = 30 #Input size 30 to include more stuff
 
 def build_world() -> OlympicArena:
     """Create the environment the robot lives in.
@@ -112,8 +113,32 @@ def nn_controller(
 
     # --- INPUTS ---------------------------------------------------------- #
     # Bare qpos - the simplest choice, not necessarily a good one. See
-    # YOUR JOB below.
-    inputs = data.qpos # dont quite understand what they mean here
+    # YOUR JOB below
+
+    position = data.qpos[0:3]
+    orientation = data.qpos[3:7]
+
+    linear_velocity = data.qvel[0:3]
+
+    joint_positions = data.qpos[7:15]
+    joint_velocities = data.qvel[6:14]
+
+    target = np.asarray(TARGET_POSITION)
+
+    relative_target = target - position
+    distance = np.linalg.norm(
+        target[:2] - position[:2]
+    )
+
+    inputs = np.concatenate([
+        position,
+        orientation,
+        linear_velocity,
+        joint_positions,
+        joint_velocities,
+        relative_target,
+        [distance],
+    ])
 
     # --- FORWARD PASS ----------------------------------------------------- #
     layer1 = np.tanh(inputs @ w1)
@@ -191,7 +216,7 @@ def run_experiment(
     # --- Wire up the controller -------------------------------------------- #
     # Sizes are read from the compiled model, never hardcoded - they depend on
     # the body you chose in build_robot().
-    input_size = len(data.qpos)
+    input_size = INPUT_SIZE
     output_size = model.nu
 
     weights = genotype_to_weights(genotype, input_size, output_size)
@@ -267,19 +292,17 @@ def main() -> None:
         correct_collision_with_floor=True,
     )
     model = world.spec.compile()
-    data = mj.MjData(model)
 
-
-    input_size = len(data.qpos)
+    input_size = INPUT_SIZE
     output_size = model.nu
     num_weights = (
         input_size * HIDDEN_SIZE
         + HIDDEN_SIZE * output_size
     )
-    console.log(f"controller inputs (len(data.qpos)) : {input_size}")
-    console.log(f"controller outputs (model.nu)      : {output_size}")
+    console.log(f"controller inputs                  : {input_size}")
+    console.log(f"controller outputs                 : {output_size}")
     console.log(f"genotype length (total weights)    : {num_weights}")
-    
+        
     genotype = RNG.normal(
     loc=0.0,
     scale=0.5,
