@@ -350,10 +350,7 @@ def main() -> None:
 
     input_size = len(data.qpos)
     output_size = model.nu
-    num_weights = (
-        input_size * HIDDEN_SIZE
-        + HIDDEN_SIZE * output_size
-    )
+    num_weights = input_size * HIDDEN_SIZE + HIDDEN_SIZE * output_size
     console.log(f"controller inputs (len(data.qpos)) : {input_size}")
     console.log(f"controller outputs (model.nu)      : {output_size}")
     console.log(f"genotype length (total weights)    : {num_weights}")
