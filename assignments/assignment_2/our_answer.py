@@ -16,6 +16,7 @@ from ariel.utils.runners import simple_runner
 from ariel.utils.video_recorder import VideoRecorder
 
 from parameters import *
+from helpers import *
 
 # ariel.ec's own generators/mutators/crossover draw from a separate,
 # package-level RNG. Reseed it too if you build your EA on ariel.ec,
@@ -43,20 +44,6 @@ def build_robot() -> CoreModule:
     FIXED within an experiment.
     """
     return spider()
-
-
-def genotype_to_weights(
-    genotype: npt.NDArray[np.float64],
-    input_size: int,
-    output_size: int,
-) -> list[npt.NDArray[np.float64]]:
-
-    num_w1 = input_size * HIDDEN_SIZE
-
-    w1 = genotype[:num_w1].reshape(input_size, HIDDEN_SIZE)
-    w2 = genotype[num_w1:].reshape(HIDDEN_SIZE, output_size)
-
-    return [w1, w2]
 
 
 def nn_controller(
