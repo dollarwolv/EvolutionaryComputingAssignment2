@@ -1,7 +1,3 @@
-# Standard library
-from pathlib import Path
-from typing import Literal
-
 # Third-party libraries
 import mujoco as mj
 import numpy as np
@@ -11,47 +7,27 @@ from mujoco import viewer
 # Local libraries (ARIEL)
 from ariel import console
 from ariel.body_phenotypes.robogen_lite.modules.core import CoreModule
-from ariel.body_phenotypes.robogen_lite.prebuilt_robots.gecko import gecko
+
 from ariel.body_phenotypes.robogen_lite.prebuilt_robots.spider import spider
 from ariel.ec import set_seed
-from ariel.simulation.environments import SimpleFlatWorld, OlympicArena
+from ariel.simulation.environments import OlympicArena
 from ariel.utils.renderers import single_frame_renderer, video_renderer
 from ariel.utils.runners import simple_runner
 from ariel.utils.video_recorder import VideoRecorder
 
-# Type aliases
-type ViewerTypes = Literal["launcher", "video", "simple", "frame", "no_control"]
-
-# --- RANDOM GENERATOR SETUP --- #
-# Fix the seed while you are debugging.
-# Report results over MULTIPLE seeds.
-SEED = 42
-RNG = np.random.default_rng(SEED)
+from parameters import *
+from helpers import *
 
 # ariel.ec's own generators/mutators/crossover draw from a separate,
 # package-level RNG. Reseed it too if you build your EA on ariel.ec,
 # or every one of your "multiple seeds" runs the same variation operators.
 set_seed(SEED)
 
-# --- DATA SETUP --- #
-SCRIPT_NAME = Path(__file__).stem
-CWD = Path.cwd()
-DATA = CWD / "__data__" / SCRIPT_NAME
-DATA.mkdir(parents=True, exist_ok=True)
-
-# --- EXPERIMENT CONSTANTS --- #
-SPAWN_POS: list[float] = [-1.0, 0.0, 0.1]  # where the robot starts, i think this is the flat part of the olympic arena
-TARGET_POSITION: list[float] = [2.0, 0.0, 0.1]  # where it should end up, might need to be lik 5 for the olympic arena
-SIM_DURATION: float = 15.0  # seconds of simulated time per evaluation
-MODE: ViewerTypes = "launcher"  # see run_experiment() for the options
-
-HIDDEN_SIZE = 8 #For now setting the number of hidden nodes to 8
-INPUT_SIZE = 30 #Input size 30 to include more stuff
 
 def build_world() -> OlympicArena:
-    """Create the environment the robot lives in.
-    """
+    """Create the environment the robot lives in."""
     return OlympicArena()
+
 
 def build_robot() -> CoreModule:
     """Create the robot body.
@@ -68,19 +44,6 @@ def build_robot() -> CoreModule:
     FIXED within an experiment.
     """
     return spider()
-
-def genotype_to_weights(
-    genotype: npt.NDArray[np.float64],
-    input_size: int,
-    output_size: int,
-) -> list[npt.NDArray[np.float64]]:
-
-    num_w1 = input_size * HIDDEN_SIZE
-
-    w1 = genotype[:num_w1].reshape(input_size, HIDDEN_SIZE)
-    w2 = genotype[num_w1:].reshape(HIDDEN_SIZE, output_size)
-
-    return [w1, w2]
 
 
 def nn_controller(
@@ -126,19 +89,19 @@ def nn_controller(
     target = np.asarray(TARGET_POSITION)
 
     relative_target = target - position
-    distance = np.linalg.norm(
-        target[:2] - position[:2]
-    )
+    distance = np.linalg.norm(target[:2] - position[:2])
 
-    inputs = np.concatenate([
-        position,
-        orientation,
-        linear_velocity,
-        joint_positions,
-        joint_velocities,
-        relative_target,
-        [distance],
-    ])
+    inputs = np.concatenate(
+        [
+            position,
+            orientation,
+            linear_velocity,
+            joint_positions,
+            joint_velocities,
+            relative_target,
+            [distance],
+        ]
+    )
 
     # --- FORWARD PASS ----------------------------------------------------- #
     layer1 = np.tanh(inputs @ w1)
@@ -146,8 +109,6 @@ def nn_controller(
 
     # --- RESCALE TO THE HINGE RANGE --------------------------------------- #
     return outputs * (np.pi / 2)  # in [-pi/2, pi/2]
-
-
 
 
 def get_core_position(data: mj.MjData) -> npt.NDArray[np.float64]:
@@ -176,7 +137,9 @@ def fitness_function(
     target = np.asarray(TARGET_POSITION)
     return float(np.linalg.norm(final_position[:2] - target[:2]))
 
-##########################################################3
+
+##########################################################
+
 
 def run_experiment(
     genotype: npt.NDArray[np.float64],
@@ -295,18 +258,15 @@ def main() -> None:
 
     input_size = INPUT_SIZE
     output_size = model.nu
-    num_weights = (
-        input_size * HIDDEN_SIZE
-        + HIDDEN_SIZE * output_size
-    )
+    num_weights = input_size * HIDDEN_SIZE + HIDDEN_SIZE * output_size
     console.log(f"controller inputs                  : {input_size}")
     console.log(f"controller outputs                 : {output_size}")
     console.log(f"genotype length (total weights)    : {num_weights}")
-        
+
     genotype = RNG.normal(
-    loc=0.0,
-    scale=0.5,
-    size=num_weights,
+        loc=0.0,
+        scale=0.5,
+        size=num_weights,
     )
 
     run_experiment(genotype, MODE)
@@ -314,4 +274,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
