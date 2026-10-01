@@ -34,3 +34,4 @@ MODE: ViewerTypes = "launcher"  # see run_experiment() for the options
 HIDDEN_SIZE = 8  # For now setting the number of hidden nodes to 8
 INPUT_SIZE = 30  # Input size 30 to include more stuff
 MUTATION_PROBABILITY = 0.05
+TOURNAMENT_SIZE = 3

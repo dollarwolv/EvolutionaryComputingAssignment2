@@ -4,6 +4,15 @@ from parameters import *
 from helpers import *
 
 
+def evaluate_population(population: list[list[float]]) -> list[float]:
+    """Run every genotype in the population and return their fitnesses,
+    in the same order as `population`.
+    """
+    return [run_experiment(genotype, mode="simple") for genotype in population]
+# in your EA file (e.g. selection.py or ea.py)
+
+
+
 def mutate(
     weights: list[npt.NDArray[np.float64]],
     sigma: float = 0.2,
@@ -51,6 +60,19 @@ def mutate_genotype(
     )
     mutated_weights = mutate(weights, sigma, mutation_prob)
     return weights_to_genotype(mutated_weights)
+
+
+def tournament_selection(
+    genotypes: list[list[float]],
+    fitnesses: list[float],
+    k: int = TOURNAMENT_SIZE,
+) -> list[float]:
+    """Pick one parent: sample k individuals at random, return the best.
+    LOWER fitness is better, matching fitness_function.
+    """
+    candidate_idxs = RNG.choice(len(genotypes), size=k, replace=False)
+    best_idx = min(candidate_idxs, key=lambda i: fitnesses[i])
+    return genotypes[best_idx]
 
 
 def crossover(
