@@ -4,28 +4,39 @@ import numpy as np
 import numpy.typing as npt
 from mujoco import viewer
 import argparse
+from pathlib import Path
+import torch
+import random
+import pandas as pd
+
 
 # Local libraries (ARIEL)
 from ariel import console
 from ariel.body_phenotypes.robogen_lite.modules.core import CoreModule
 from ariel.ec import Population, Individual, EA, EAOperation
-from ariel.body_phenotypes.robogen_lite.prebuilt_robots.spider import spider
 from ariel.ec import set_seed
-from ariel.simulation.environments import OlympicArena
 from ariel.simulation.environments import SimpleFlatWorld
 from ariel.body_phenotypes.robogen_lite.prebuilt_robots.john_set import  spider_8
 from ariel.utils.renderers import single_frame_renderer, video_renderer
 from ariel.utils.runners import simple_runner
 from ariel.utils.video_recorder import VideoRecorder
 
-from parameters import * 
+from parameters import *
 from helpers import genotype_to_weights
 from EA_operators import parent_selection, crossover, mutate, survivor_selection
+from plot_results import create_plot
+
 
 # ariel.ec's own generators/mutators/crossover draw from a separate,
 # package-level RNG. Reseed it too if you build your EA on ariel.ec,
 # or every one of your "multiple seeds" runs the same variation operators.
-set_seed(SEED)
+# function to set seed for reach run
+def set_seed(seed: int) -> None:
+    RNG = np.random.default_rng(seed)
+    random.seed(seed)
+    torch.manual_seed(seed)
+
+HERE = Path(__file__).parent
 
 # ============================================================================ #
 #  1. THE BODY AND THE WORLD
@@ -297,10 +308,48 @@ def controller_output_size() -> int:
 
     return output_size
 
+# Calculate summary statistics for the current population.
+def get_stats(population: Population) -> dict:
+    fitnesses = []
+
+    for ind in population.alive:
+        if ind.fitness_ is not None:
+            fitnesses.append(ind.fitness_)
+
+    return {
+        "best_fitness": min(fitnesses),
+        "mean_fitness": np.mean(fitnesses),
+        "std_fitness": np.std(fitnesses),
+    }
+
+
+def log_stats(
+    population: Population,
+    this_run: list,
+    run: int,
+) -> Population:
+    previous = this_run[-1]
+    generation = previous["generation"] + 1
+
+    stats = get_stats(population)
+    best_so_far = min(previous["best_so_far"], stats["best_fitness"])
+
+    this_run.append(
+        {
+            "run": run + 1,
+            "generation": generation,
+            "best_fitness": stats["best_fitness"],
+            "mean_fitness": stats["mean_fitness"],
+            "std_fitness": stats["std_fitness"],
+            "best_so_far": best_so_far,
+        }
+    )
+
+    return population
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Brain Evolution", formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--crossover", choices=["uniform", "neuron_block"])
+    p.add_argument("--crossover", choices=["uniform", "neuron_block"], default="uniform")
     #p.add_argument("--algorithm", choices=["ea", "random"], default="ea")
     args = p.parse_args()
     return args
@@ -308,31 +357,68 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
 
-    initial = Population([])
+    all_results = []
 
-    nn_output_size = controller_output_size()
-    num_weights = INPUT_SIZE * HIDDEN_SIZE + HIDDEN_SIZE * nn_output_size
+    for run in range(NUM_RUNS):
+        seed = BASE_SEED + run
+        set_seed(seed)
+        initial = Population([])
 
-    for _ in range(POPULATION_SIZE):
-        ind = Individual()
-        ind.genotype = RNG.normal(loc=0.0, scale=0.5, size=num_weights).tolist()
-        initial.append(ind)
-    initial = evaluate(initial)
+        nn_output_size = controller_output_size()
+        num_weights = INPUT_SIZE * HIDDEN_SIZE + HIDDEN_SIZE * nn_output_size
 
-    ea = EA(
-        initial,
-        [
-            EAOperation(parent_selection),
-            EAOperation(crossover,  controller_output_size=nn_output_size, crossover_type=args.crossover),
-            EAOperation(mutate,controller_output_size=nn_output_size),
-            EAOperation(evaluate),
-            EAOperation(survivor_selection),
-            #EAOperation(log_generation),
-        ],
-        num_steps=NUM_GENERATIONS,
-        is_maximisation=False
-    )
-    ea.run()
+        for _ in range(POPULATION_SIZE):
+            ind = Individual()
+            ind.genotype = RNG.normal(loc=0.0, scale=0.5, size=num_weights).tolist()
+            initial.append(ind)
+        initial = evaluate(initial)
+
+        this_run = []
+        best_so_far = initial.best(sort="min", attribute="fitness_", n=1)[0].fitness_
+
+        initial_stats = get_stats(initial)
+
+        this_run.append(
+            {
+                "run": run + 1,
+                "generation": 0,
+                "best_fitness": initial_stats["best_fitness"],
+                "mean_fitness": initial_stats["mean_fitness"],
+                "std_fitness": initial_stats["std_fitness"],
+                "best_so_far": best_so_far
+            }
+        )
+
+        ea = EA(
+            initial,
+            [
+                EAOperation(parent_selection),
+                EAOperation(crossover, controller_output_size=nn_output_size, crossover_type=args.crossover),
+                EAOperation(mutate, controller_output_size=nn_output_size),
+                EAOperation(evaluate),
+                EAOperation(survivor_selection),
+                EAOperation(log_stats, this_run=this_run, run=run),
+            ],
+            num_steps=NUM_GENERATIONS,
+            is_maximisation=False
+        )
+        ea.run()
+
+        all_results.extend(this_run)
+
+        # Save the best individual's genotype to a file 
+        best_individual = ea.get_solution('best', only_alive=True)
+        output_dir = HERE / "outputs"
+        output_dir.mkdir(parents=True, exist_ok=True)
+        with (output_dir / "best_phenotype.txt").open("w") as phenotype_file:
+            np.savetxt(phenotype_file, np.asarray(best_individual.genotype))
+
+
+    df = pd.DataFrame(all_results)
+    df.to_csv(HERE / "outputs" / f"dataset_{args.crossover}.csv", index=False)
+    create_plot(args.crossover)
+
+
 
 
 if __name__ == "__main__":

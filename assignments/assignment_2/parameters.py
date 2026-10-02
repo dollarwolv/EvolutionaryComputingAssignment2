@@ -5,29 +5,12 @@ from pathlib import Path
 type ViewerTypes = Literal["launcher", "video", "simple", "frame", "no_control"]
 from typing import Literal
 
-# --- RANDOM GENERATOR SETUP --- #
-# Fix the seed while you are debugging.
-# Report results over MULTIPLE seeds.
-SEED = 42
-RNG = np.random.default_rng(SEED)
-
 # --- DATA SETUP --- #
 SCRIPT_NAME = Path(__file__).stem
 CWD = Path.cwd()
 DATA = CWD / "__data__" / SCRIPT_NAME
 DATA.mkdir(parents=True, exist_ok=True)
 
-# --- EXPERIMENT CONSTANTS --- #
-# SPAWN_POS: list[float] = [
-#     -1.0,
-#     0.0,
-#     0.1,
-# ]  # where the robot starts, i think this is the flat part of the olympic arena
-# TARGET_POSITION: list[float] = [
-#     5.42,
-#     0,
-#     0.2 + 0.106,
-# ]  # where it should end up, might need to be lik 5 for the olympic arena
 
 SPAWN_POS: list[float] = [0.0, 0.0, 0.1]  # where the robot starts for flat
 TARGET_POSITION: list[float] = [2.0, 0.0, 0.1]  # where it should end up for flat
@@ -42,6 +25,11 @@ INPUT_SIZE = 30  # Input size 30 to include more stuff
 MUTATION_PROBABILITY = 0.05
 TOURNAMENT_SIZE = 3
 
+RNG = np.random.default_rng() 
+
 # --- EVOLUTIONARY ALGORITHM CONSTANTS --- #
 POPULATION_SIZE = 10
 NUM_GENERATIONS = 10
+NUM_RUNS = 5
+BASE_SEED = 42
+
