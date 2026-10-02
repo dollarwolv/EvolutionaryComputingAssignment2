@@ -30,8 +30,14 @@ TARGET_POSITION: list[float] = [
 ]  # where it should end up, might need to be lik 5 for the olympic arena
 SIM_DURATION: float = 15.0  # seconds of simulated time per evaluation
 MODE: ViewerTypes = "launcher"  # see run_experiment() for the options
+TILT_LIMIT = 0.5        #tilt will count as tipped over
+ARRIVAL_RADIUS = 0.30   # closer than this (metres) counts as that its reached the targer
 
 HIDDEN_SIZE = 8  # For now setting the number of hidden nodes to 8
 INPUT_SIZE = 30  # Input size 30 to include more stuff
 MUTATION_PROBABILITY = 0.05
 TOURNAMENT_SIZE = 3
+
+# --- EVOLUTIONARY ALGORITHM CONSTANTS --- #
+POPULATION_SIZE = 10
+NUM_GENERATIONS = 1

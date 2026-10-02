@@ -7,7 +7,7 @@ from mujoco import viewer
 # Local libraries (ARIEL)
 from ariel import console
 from ariel.body_phenotypes.robogen_lite.modules.core import CoreModule
-
+from ariel.ec import Population, Individual, EA, EAOperation
 from ariel.body_phenotypes.robogen_lite.prebuilt_robots.spider import spider
 from ariel.ec import set_seed
 from ariel.simulation.environments import OlympicArena
@@ -15,35 +15,21 @@ from ariel.utils.renderers import single_frame_renderer, video_renderer
 from ariel.utils.runners import simple_runner
 from ariel.utils.video_recorder import VideoRecorder
 
-from parameters import *
-from helpers import *
+from parameters import * 
+from helpers import genotype_to_weights
+from EA_operators import parent_selection, crossover, mutate, survivor_selection
 
 # ariel.ec's own generators/mutators/crossover draw from a separate,
 # package-level RNG. Reseed it too if you build your EA on ariel.ec,
 # or every one of your "multiple seeds" runs the same variation operators.
 set_seed(SEED)
 
-# --- DATA SETUP --- #
-SCRIPT_NAME = Path(__file__).stem
-CWD = Path.cwd()
-DATA = CWD / "__data__" / SCRIPT_NAME
-DATA.mkdir(parents=True, exist_ok=True)
-
-# --- EXPERIMENT CONSTANTS --- #
-SPAWN_POS: list[float] = [-1.0, 0.0, 0.1]  # where the robot starts, i think this is the flat part of the olympic arena
-TARGET_POSITION: list[float] = [2.0, 0.0, 0.1]  # where it should end up, might need to be lik 5 for the olympic arena
-SIM_DURATION: float = 15.0  # seconds of simulated time per evaluation
-MODE: ViewerTypes = "launcher"  # see run_experiment() for the options
-TILT_LIMIT = 0.5        #tilt will count as tipped over
-ARRIVAL_RADIUS = 0.30   # closer than this (metres) counts as that its reached the targer
-
-HIDDEN_SIZE = 8 #For now setting the number of hidden nodes to 8
-INPUT_SIZE = 30 #Input size 30 to include more stuff
-
+# ============================================================================ #
+#  1. THE BODY AND THE WORLD
+# ============================================================================ #
 def build_world() -> OlympicArena:
     """Create the environment the robot lives in."""
     return OlympicArena()
-
 
 def build_robot() -> CoreModule:
     """Create the robot body.
@@ -61,7 +47,9 @@ def build_robot() -> CoreModule:
     """
     return spider()
 
-
+# ============================================================================ #
+#  2. THE CONTROLLER CONTRACT
+# ============================================================================ #
 def nn_controller(
     model: mj.MjModel,
     data: mj.MjData,
@@ -126,13 +114,19 @@ def nn_controller(
     # --- RESCALE TO THE HINGE RANGE --------------------------------------- #
     return outputs * (np.pi / 2)  # in [-pi/2, pi/2]
 
-
+# ============================================================================ #
+#  3. POSITION AND FITNESS
+# ============================================================================ #
 def get_core_position(data: mj.MjData) -> npt.NDArray[np.float64]:
     """Return the robot core's current (x, y, z) world position."""
     return np.asarray(data.qpos[0:3]).copy()
 
-
-def fitness_function(initial_position, final_position, fell, time_to_target):
+def fitness_function(
+    initial_position: npt.NDArray[np.float64],
+    final_position: npt.NDArray[np.float64],
+    fell: bool,
+    time_to_target: float | None,
+) -> float:
     """Score one evaluation. LOWER IS BETTER.
 
     Three parts added together:
@@ -156,10 +150,9 @@ def fitness_function(initial_position, final_position, fell, time_to_target):
 
     return float(score)
 
-
-##########################################################
-
-
+# ============================================================================ #
+#  4. RUNNING ONE EVALUATION
+# ============================================================================ #
 def run_experiment(
     genotype: npt.NDArray[np.float64],
     mode: ViewerTypes = MODE,
@@ -195,9 +188,9 @@ def run_experiment(
     mj.mj_resetData(model, data)
     mj.mj_forward(model, data)
 
-    qx0, qy0 = data.qpos[4], data.qpos[5]
-    up_z0 = 1 - 2 * (qx0**2 + qy0**2)
-    print(f"starting up_z: {up_z0:.3f}")
+    # qx0, qy0 = data.qpos[4], data.qpos[5]
+    # up_z0 = 1 - 2 * (qx0**2 + qy0**2)
+    # print(f"starting up_z: {up_z0:.3f}")
 
     # --- Wire up the controller -------------------------------------------- #
     # Sizes are read from the compiled model, never hardcoded - they depend on
@@ -274,17 +267,20 @@ def run_experiment(
     fitness = fitness_function(
         initial_position, final_position, log["fell"], log["time_to_target"]
 )
-    console.log(f"start  : {np.round(initial_position, 3)}")
-    console.log(f"end    : {np.round(final_position, 3)}")
-    console.log(f"target : {np.round(TARGET_POSITION, 3)}")
-    console.log(f"fitness: {fitness:.4f}   (lower is better)")
+    # console.log(f"start  : {np.round(initial_position, 3)}")
+    # console.log(f"end    : {np.round(final_position, 3)}")
+    # console.log(f"target : {np.round(TARGET_POSITION, 3)}")
+    # console.log(f"fitness: {fitness:.4f}   (lower is better)")
 
     return fitness
 
+def evaluate(population: Population) -> Population:
+    for ind in population.unevaluated:
+        ind.fitness = run_experiment(ind.genotype, mode="simple")
+    return population
 
-def main() -> None:
-    """Run a single demo evaluation with a randomly-weighted controller."""
-    # A quick look at the size of the problem you are about to search.
+def controller_output_size() -> int:
+    """Return the output_size of the controller."""
     mj.set_mjcb_control(None)
     world = build_world()
     robot = build_robot()
@@ -294,21 +290,36 @@ def main() -> None:
         correct_collision_with_floor=True,
     )
     model = world.spec.compile()
-
-    input_size = INPUT_SIZE
     output_size = model.nu
-    num_weights = input_size * HIDDEN_SIZE + HIDDEN_SIZE * output_size
-    console.log(f"controller inputs                  : {input_size}")
-    console.log(f"controller outputs                 : {output_size}")
-    console.log(f"genotype length (total weights)    : {num_weights}")
 
-    genotype = RNG.normal(
-        loc=0.0,
-        scale=0.5,
-        size=num_weights,
+    return output_size
+
+def main() -> None:
+    initial = Population([])
+
+    nn_output_size = controller_output_size()
+    num_weights = INPUT_SIZE * HIDDEN_SIZE + HIDDEN_SIZE * nn_output_size
+
+    for _ in range(POPULATION_SIZE):
+        ind = Individual()
+        ind.genotype = RNG.normal(loc=0.0, scale=0.5, size=num_weights).tolist()
+        initial.append(ind)
+    initial = evaluate(initial)
+
+    ea = EA(
+        initial,
+        [
+            EAOperation(parent_selection),
+            EAOperation(crossover,  controller_output_size=nn_output_size, crossover_type="uniform"),
+            EAOperation(mutate,controller_output_size=nn_output_size),
+            EAOperation(evaluate),
+            EAOperation(survivor_selection),
+            #EAOperation(log_generation),
+        ],
+        num_steps=NUM_GENERATIONS,
+        is_maximisation=False
     )
-
-    run_experiment(genotype, MODE)
+    ea.run()
 
 
 if __name__ == "__main__":

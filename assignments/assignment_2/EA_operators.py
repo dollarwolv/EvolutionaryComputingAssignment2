@@ -2,18 +2,9 @@ import numpy as np
 import numpy.typing as npt
 from parameters import *
 from helpers import *
+from ariel.ec import Population, Individual
 
-
-def evaluate_population(population: list[list[float]]) -> list[float]:
-    """Run every genotype in the population and return their fitnesses,
-    in the same order as `population`.
-    """
-    return [run_experiment(genotype, mode="simple") for genotype in population]
-# in your EA file (e.g. selection.py or ea.py)
-
-
-
-def mutate(
+def mutate_weights(
     weights: list[npt.NDArray[np.float64]],
     sigma: float = 0.2,
     mutation_prob: float = MUTATION_PROBABILITY,
@@ -42,25 +33,23 @@ def mutate(
 
     return perturbed_weights
 
-
-def mutate_genotype(
-    genotype: list[float],
-    input_size: int,
-    hidden_size: int,
-    output_size: int,
-    sigma: float = 0.2,
-    mutation_prob: float = MUTATION_PROBABILITY,
-) -> list[float]:
-    """Mutate a flat genotype and return it in the same flat format."""
-    weights = genotype_to_weights(
-        np.asarray(genotype, dtype=np.float64),
-        input_size,
-        output_size,
-        hidden_size,
-    )
-    mutated_weights = mutate(weights, sigma, mutation_prob)
-    return weights_to_genotype(mutated_weights)
-
+def mutate(
+        population: Population,
+        controller_output_size: int,
+        sigma: float = 0.2,
+        mutation_prob: float = MUTATION_PROBABILITY,
+) -> Population:
+    for ind in population.where(lambda ind: bool(ind.tags.get("mutate", False))):
+        weights = genotype_to_weights(
+            np.asarray(ind.genotype, dtype=np.float64),
+            INPUT_SIZE,
+            controller_output_size,
+            HIDDEN_SIZE,
+        )
+        mutated_weights = mutate_weights(weights, sigma, mutation_prob)
+        ind.genotype = weights_to_genotype(mutated_weights)
+        ind.requires_eval = True
+    return population
 
 def tournament_selection(
     genotypes: list[list[float]],
@@ -74,8 +63,22 @@ def tournament_selection(
     best_idx = min(candidate_idxs, key=lambda i: fitnesses[i])
     return genotypes[best_idx]
 
+def parent_selection(population: Population) -> Population:
+    shuffled = population.shuffle()
+    for idx in range(0, len(shuffled) - 1, 2):
+        ind_a = shuffled[idx]
+        ind_b = shuffled[idx + 1]
+        if ind_a.fitness_ is not None and ind_b.fitness_ is not None:
+            if ind_a.fitness_ >= ind_b.fitness_:
+                ind_a.tags = {"selected": True}
+                ind_b.tags = {"selected": False}
+            else:
+                ind_a.tags = {"selected": False}
+                ind_b.tags = {"selected": True}
 
-def crossover(
+    return shuffled
+
+def crossover_weights(
     parents: tuple[list[npt.NDArray[np.float64]], list[npt.NDArray[np.float64]]],
     crossover_type: str = "uniform",
 ) -> tuple[list[npt.NDArray[np.float64]], list[npt.NDArray[np.float64]]]:
@@ -183,35 +186,59 @@ def crossover(
 
     return child_1, child_2
 
+def crossover(
+        population: Population, 
+        controller_output_size: int,
+        crossover_type: str
+) -> Population:
+    parents = population.where(lambda ind: bool(ind.tags.get("selected", False)))
+    for idx in range(0, len(parents) - 1, 2):
+        p_a = parents[idx]
+        p_b = parents[idx + 1]
+        
+        parent_1_weights = genotype_to_weights(
+            np.asarray(p_a.genotype, dtype=np.float64),
+            INPUT_SIZE,
+            controller_output_size,
+            HIDDEN_SIZE,
+        )
+        parent_2_weights = genotype_to_weights(
+            np.asarray(p_b.genotype, dtype=np.float64),
+            INPUT_SIZE,
+            controller_output_size,
+            HIDDEN_SIZE,
+        )
 
-def crossover_genotypes(
-    parent_1_genotype: list[float],
-    parent_2_genotype: list[float],
-    input_size: int,
-    hidden_size: int,
-    output_size: int,
-    crossover_type: str,
-) -> tuple[list[float], list[float]]:
-    """Apply crossover to flat genotypes and return flat child genotypes."""
-    parent_1_weights = genotype_to_weights(
-        np.asarray(parent_1_genotype, dtype=np.float64),
-        input_size,
-        output_size,
-        hidden_size,
-    )
-    parent_2_weights = genotype_to_weights(
-        np.asarray(parent_2_genotype, dtype=np.float64),
-        input_size,
-        output_size,
-        hidden_size,
-    )
+        child_1_weights, child_2_weights = crossover_weights(
+            (parent_1_weights, parent_2_weights),
+            crossover_type=crossover_type,
+        )
 
-    child_1_weights, child_2_weights = crossover(
-        (parent_1_weights, parent_2_weights),
-        crossover_type=crossover_type,
-    )
+        child_1_genotype = weights_to_genotype(child_1_weights)
+        child_2_genotype = weights_to_genotype(child_2_weights)
 
-    child_1_genotype = weights_to_genotype(child_1_weights)
-    child_2_genotype = weights_to_genotype(child_2_weights)
+        child_a = Individual()
+        child_a.genotype = child_1_genotype
+        child_a.tags = {"mutate": True}
 
-    return child_1_genotype, child_2_genotype
+        child_b = Individual()
+        child_b.genotype = child_2_genotype
+        child_b.tags = {"mutate": True}
+
+        population.extend([child_a, child_b])
+    return population
+
+def survivor_selection(population: Population) -> Population:
+    shuffled = population.alive.shuffle()
+    alive_count = len(shuffled)
+    for idx in range(0, len(shuffled) - 1, 2):
+        if alive_count <= POPULATION_SIZE:
+            break
+        ind_a = shuffled[idx]
+        ind_b = shuffled[idx + 1]
+        if (ind_a.fitness_ or 0.0) >= (ind_b.fitness_ or 0.0):
+            ind_b.alive = False
+        else:
+            ind_a.alive = False
+        alive_count -= 1
+    return population

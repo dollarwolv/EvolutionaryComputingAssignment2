@@ -12,8 +12,8 @@ def genotype_to_weights(
 
     num_w1 = input_size * hidden_size
 
-    w1 = genotype[:num_w1].reshape(input_size, hidden_size)
-    w2 = genotype[num_w1:].reshape(hidden_size, output_size)
+    w1 = np.asarray(genotype[:num_w1]).reshape(input_size, hidden_size)
+    w2 = np.asarray(genotype[num_w1:]).reshape(hidden_size, output_size)
 
     return [w1, w2]
 
