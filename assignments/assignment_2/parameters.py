@@ -18,16 +18,20 @@ DATA = CWD / "__data__" / SCRIPT_NAME
 DATA.mkdir(parents=True, exist_ok=True)
 
 # --- EXPERIMENT CONSTANTS --- #
-SPAWN_POS: list[float] = [
-    -1.0,
-    0.0,
-    0.1,
-]  # where the robot starts, i think this is the flat part of the olympic arena
-TARGET_POSITION: list[float] = [
-    5.42,
-    0,
-    0.2 + 0.106,
-]  # where it should end up, might need to be lik 5 for the olympic arena
+# SPAWN_POS: list[float] = [
+#     -1.0,
+#     0.0,
+#     0.1,
+# ]  # where the robot starts, i think this is the flat part of the olympic arena
+# TARGET_POSITION: list[float] = [
+#     5.42,
+#     0,
+#     0.2 + 0.106,
+# ]  # where it should end up, might need to be lik 5 for the olympic arena
+
+SPAWN_POS: list[float] = [0.0, 0.0, 0.1]  # where the robot starts for flat
+TARGET_POSITION: list[float] = [2.0, 0.0, 0.1]  # where it should end up for flat
+
 SIM_DURATION: float = 15.0  # seconds of simulated time per evaluation
 MODE: ViewerTypes = "launcher"  # see run_experiment() for the options
 TILT_LIMIT = 0.5        #tilt will count as tipped over

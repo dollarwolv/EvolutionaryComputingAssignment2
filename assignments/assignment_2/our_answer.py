@@ -12,6 +12,8 @@ from ariel.ec import Population, Individual, EA, EAOperation
 from ariel.body_phenotypes.robogen_lite.prebuilt_robots.spider import spider
 from ariel.ec import set_seed
 from ariel.simulation.environments import OlympicArena
+from ariel.simulation.environments import SimpleFlatWorld
+from ariel.body_phenotypes.robogen_lite.prebuilt_robots.john_set import  spider_8
 from ariel.utils.renderers import single_frame_renderer, video_renderer
 from ariel.utils.runners import simple_runner
 from ariel.utils.video_recorder import VideoRecorder
@@ -28,9 +30,9 @@ set_seed(SEED)
 # ============================================================================ #
 #  1. THE BODY AND THE WORLD
 # ============================================================================ #
-def build_world() -> OlympicArena:
+def build_world() -> SimpleFlatWorld:
     """Create the environment the robot lives in."""
-    return OlympicArena()
+    return SimpleFlatWorld()
 
 def build_robot() -> CoreModule:
     """Create the robot body.
@@ -46,7 +48,7 @@ def build_robot() -> CoreModule:
     Change the body and your genotype length changes with it. Keep the body
     FIXED within an experiment.
     """
-    return spider()
+    return spider_8()
 
 # ============================================================================ #
 #  2. THE CONTROLLER CONTRACT
