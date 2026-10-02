@@ -3,6 +3,7 @@ import mujoco as mj
 import numpy as np
 import numpy.typing as npt
 from mujoco import viewer
+import argparse
 
 # Local libraries (ARIEL)
 from ariel import console
@@ -294,7 +295,17 @@ def controller_output_size() -> int:
 
     return output_size
 
+
+def parse_args() -> argparse.Namespace:
+    p = argparse.ArgumentParser(description="Brain Evolution", formatter_class=argparse.RawDescriptionHelpFormatter)
+    p.add_argument("--crossover", choices=["uniform", "neuron_block"])
+    #p.add_argument("--algorithm", choices=["ea", "random"], default="ea")
+    args = p.parse_args()
+    return args
+
 def main() -> None:
+    args = parse_args()
+
     initial = Population([])
 
     nn_output_size = controller_output_size()
@@ -310,7 +321,7 @@ def main() -> None:
         initial,
         [
             EAOperation(parent_selection),
-            EAOperation(crossover,  controller_output_size=nn_output_size, crossover_type="uniform"),
+            EAOperation(crossover,  controller_output_size=nn_output_size, crossover_type=args.crossover),
             EAOperation(mutate,controller_output_size=nn_output_size),
             EAOperation(evaluate),
             EAOperation(survivor_selection),
