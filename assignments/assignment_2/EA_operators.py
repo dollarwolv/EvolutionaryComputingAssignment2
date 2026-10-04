@@ -65,7 +65,7 @@ def tournament_selection(
 
 def parent_selection(population: Population) -> Population:
     for ind in population:
-        ind.tags = {"selected": False}
+        ind.tags = {"selected": False, "mutate": False}
     shuffled = population.shuffle()
     for idx in range(0, len(shuffled) - 1, 2):
         ind_a = shuffled[idx]
@@ -229,6 +229,22 @@ def crossover(
 
         population.extend([child_a, child_b])
     return population
+
+
+def clone_selected_parents(population: Population) -> Population:
+    """Create offspring by copying selected parents without crossover."""
+    parents = population.where(
+        lambda ind: bool(ind.tags.get("selected", False))
+    )
+    for idx in range(0, len(parents) - 1, 2):
+        # Copy two parents per pair to match the offspring count of crossover.
+        for parent in (parents[idx], parents[idx + 1]):
+            child = Individual()
+            child.genotype = list(parent.genotype)
+            child.tags = {"mutate": True}
+            population.append(child)
+    return population
+
 
 def survivor_selection(population: Population) -> Population:
     shuffled = population.alive.shuffle()

@@ -22,7 +22,13 @@ from ariel.utils.video_recorder import VideoRecorder
 
 from parameters import *
 from helpers import genotype_to_weights, has_plateaued
-from EA_operators import parent_selection, crossover, mutate, survivor_selection
+from EA_operators import (
+    parent_selection,
+    crossover,
+    clone_selected_parents,
+    mutate,
+    survivor_selection,
+)
 from plot_results import create_plot
 
 
@@ -386,15 +392,20 @@ def run_ea(
 
     this_run = [make_record(run, 0, get_stats(initial), None)]
 
+    if crossover_type == "mutation_only":
+        reproduction = EAOperation(clone_selected_parents)
+    else:
+        reproduction = EAOperation(
+            crossover,
+            controller_output_size=nn_output_size,
+            crossover_type=crossover_type,
+        )
+
     ea = EA(
         initial,
         [
             EAOperation(parent_selection),
-            EAOperation(
-                crossover,
-                controller_output_size=nn_output_size,
-                crossover_type=crossover_type,
-            ),
+            reproduction,
             EAOperation(mutate, controller_output_size=nn_output_size),
             EAOperation(evaluate),
             EAOperation(survivor_selection),
@@ -455,7 +466,10 @@ def parse_args() -> argparse.Namespace:
     )
     p.add_argument("--algorithm", choices=["ea", "random"], default="ea")
     p.add_argument(
-        "--crossover", choices=["uniform", "neuron_block"], default="uniform"
+        "--crossover",
+        choices=["uniform", "neuron_block", "mutation_only"],
+        default="uniform",
+        help="Variation condition; mutation_only copies parents without crossover.",
     )
     p.add_argument(
         "--runs",

@@ -11,6 +11,7 @@ OUTPUTS = HERE / "outputs"
 LABELS = {
     "uniform": "EA - uniform crossover",
     "neuron_block": "EA - neuron-block crossover",
+    "mutation_only": "EA - mutation only",
     "random": "Random search (baseline)",
 }
 

@@ -5,7 +5,7 @@ from our_answer import run_experiment
 
 def main() -> None:
     p = argparse.ArgumentParser(description="Replay a saved best genotype")
-    p.add_argument("--label", default="uniform", help="uniform, neuron_block or random")
+    p.add_argument("--label", default="uniform", help="uniform, neuron_block, mutation_only or random")
     p.add_argument("--run", type=int, default=1)
     p.add_argument("--mode", default="launcher", help="launcher or video")
     args = p.parse_args()
