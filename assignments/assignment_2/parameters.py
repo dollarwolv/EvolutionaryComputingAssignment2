@@ -21,15 +21,17 @@ TILT_LIMIT = 0.5        #tilt will count as tipped over
 ARRIVAL_RADIUS = 0.30   # closer than this (metres) counts as that its reached the targer
 
 HIDDEN_SIZE = 8  # For now setting the number of hidden nodes to 8
-INPUT_SIZE = 30  # Input size 30 to include more stuff
+INPUT_SIZE = 33
+GAIT_FREQUENCY = 1.0  # Hz of the sin/cos clock fed to the network
 MUTATION_PROBABILITY = 0.05
+MUTATION_SIGMA = 0.2 
 TOURNAMENT_SIZE = 3
 
 RNG = np.random.default_rng() 
 
 # --- EVOLUTIONARY ALGORITHM CONSTANTS --- #
-POPULATION_SIZE = 10
-NUM_GENERATIONS = 10
+POPULATION_SIZE = 30
+NUM_GENERATIONS = 500
 NUM_RUNS = 5
 BASE_SEED = 42
 

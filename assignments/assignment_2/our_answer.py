@@ -14,7 +14,7 @@ import pandas as pd
 from ariel import console
 from ariel.body_phenotypes.robogen_lite.modules.core import CoreModule
 from ariel.ec import Population, Individual, EA, EAOperation
-from ariel.ec import set_seed
+from ariel.ec import set_seed as ariel_set_seed
 from ariel.simulation.environments import SimpleFlatWorld
 from ariel.body_phenotypes.robogen_lite.prebuilt_robots.john_set import  spider_8
 from ariel.utils.renderers import single_frame_renderer, video_renderer
@@ -32,9 +32,10 @@ from plot_results import create_plot
 # or every one of your "multiple seeds" runs the same variation operators.
 # function to set seed for reach run
 def set_seed(seed: int) -> None:
-    RNG = np.random.default_rng(seed)
+    RNG.bit_generator.state = np.random.default_rng(seed).bit_generator.state
     random.seed(seed)
     torch.manual_seed(seed)
+    ariel_set_seed(seed)
 
 HERE = Path(__file__).parent
 
@@ -109,6 +110,11 @@ def nn_controller(
     relative_target = target - position
     distance = np.linalg.norm(target[:2] - position[:2])
 
+    # Clock signal so the network has something to drive a rhythmic gait with,
+    # plus a constant 1 that acts as the bias for the hidden layer.
+    phase = 2 * np.pi * GAIT_FREQUENCY * data.time
+    clock = [np.sin(phase), np.cos(phase), 1.0]
+
     inputs = np.concatenate(
         [
             position,
@@ -118,6 +124,7 @@ def nn_controller(
             joint_velocities,
             relative_target,
             [distance],
+            clock,
         ]
     )
 
@@ -308,18 +315,43 @@ def controller_output_size() -> int:
 
     return output_size
 
+# Each generation, binary tournaments pick POPULATION_SIZE // 2 parents, which
+# are paired up and produce 2 children per pair - so this many evaluations/gen.
+OFFSPRING_PER_GENERATION = 2 * ((POPULATION_SIZE // 2) // 2)
+
+
+def new_individual(num_weights: int) -> Individual:
+    ind = Individual()
+    ind.genotype = RNG.normal(loc=0.0, scale=0.5, size=num_weights).tolist()
+    return ind
+
+
 # Calculate summary statistics for the current population.
 def get_stats(population: Population) -> dict:
-    fitnesses = []
-
-    for ind in population.alive:
-        if ind.fitness_ is not None:
-            fitnesses.append(ind.fitness_)
+    fitnesses = [ind.fitness_ for ind in population.alive if ind.fitness_ is not None]
 
     return {
         "best_fitness": min(fitnesses),
         "mean_fitness": np.mean(fitnesses),
         "std_fitness": np.std(fitnesses),
+    }
+
+
+def make_record(
+    run: int,
+    generation: int,
+    stats: dict,
+    previous: dict | None,
+) -> dict:
+    best_so_far = stats["best_fitness"]
+    if previous is not None:
+        best_so_far = min(best_so_far, previous["best_so_far"])
+        
+    return {
+        "run": run,
+        "generation": generation,
+        **stats,
+        "best_so_far": best_so_far,
     }
 
 
@@ -329,95 +361,107 @@ def log_stats(
     run: int,
 ) -> Population:
     previous = this_run[-1]
-    generation = previous["generation"] + 1
-
-    stats = get_stats(population)
-    best_so_far = min(previous["best_so_far"], stats["best_fitness"])
-
     this_run.append(
-        {
-            "run": run + 1,
-            "generation": generation,
-            "best_fitness": stats["best_fitness"],
-            "mean_fitness": stats["mean_fitness"],
-            "std_fitness": stats["std_fitness"],
-            "best_so_far": best_so_far,
-        }
+        make_record(run, previous["generation"] + 1, get_stats(population), previous)
     )
-
     return population
+
+
+def run_ea(
+    run: int,
+    num_weights: int,
+    nn_output_size: int,
+    crossover_type: str,
+    label: str,
+) -> tuple[list, list]:
+    initial = Population([new_individual(num_weights) for _ in range(POPULATION_SIZE)])
+    initial = evaluate(initial)
+
+    this_run = [make_record(run, 0, get_stats(initial), None)]
+
+    ea = EA(
+        initial,
+        [
+            EAOperation(parent_selection),
+            EAOperation(crossover, controller_output_size=nn_output_size, crossover_type=crossover_type),
+            EAOperation(mutate, controller_output_size=nn_output_size),
+            EAOperation(evaluate),
+            EAOperation(survivor_selection),
+            EAOperation(log_stats, this_run=this_run, run=run),
+        ],
+        num_steps=NUM_GENERATIONS,
+        is_maximisation=False,
+        # one database per run, so runs in parallel terminals don't clash
+        db_file_path=HERE / "__data__" / f"{label}_run_{run}.db",
+    )
+    ea.run()
+
+    best_individual = ea.get_solution("best", only_alive=True)
+    return this_run, best_individual.genotype
+
+
+def run_random_search(run: int, num_weights: int) -> tuple[list, list]:
+    """Baseline: sample random controllers with the same evaluation budget as the EA.
+
+    Generation 0 samples POPULATION_SIZE controllers, every later "generation"
+    samples OFFSPRING_PER_GENERATION new ones, exactly like the EA.
+    """
+    batch = evaluate(Population([new_individual(num_weights) for _ in range(POPULATION_SIZE)]))
+    this_run = [make_record(run, 0, get_stats(batch), None)]
+    best = batch.best(sort="min", attribute="fitness_", n=1)[0]
+
+    for generation in range(1, NUM_GENERATIONS + 1):
+        batch = evaluate(
+            Population([new_individual(num_weights) for _ in range(OFFSPRING_PER_GENERATION)])
+        )
+        this_run.append(make_record(run, generation, get_stats(batch), this_run[-1]))
+        batch_best = batch.best(sort="min", attribute="fitness_", n=1)[0]
+        if batch_best.fitness_ < best.fitness_:
+            best = batch_best
+
+    return this_run, best.genotype
+
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Brain Evolution", formatter_class=argparse.RawDescriptionHelpFormatter)
+    p.add_argument("--algorithm", choices=["ea", "random"], default="ea")
     p.add_argument("--crossover", choices=["uniform", "neuron_block"], default="uniform")
-    #p.add_argument("--algorithm", choices=["ea", "random"], default="ea")
+    p.add_argument(
+        "--runs",
+        type=int,
+        nargs="+",
+        default=list(range(1, NUM_RUNS + 1)),
+        help="Which runs to execute (1-based); run r uses seed BASE_SEED + r - 1. "
+        "Split runs over several terminals to use more CPU cores.",
+    )
     args = p.parse_args()
     return args
 
 def main() -> None:
     args = parse_args()
+    label = args.crossover if args.algorithm == "ea" else "random"
 
-    all_results = []
+    output_dir = HERE / "outputs" / label
+    output_dir.mkdir(parents=True, exist_ok=True)
 
-    for run in range(NUM_RUNS):
-        seed = BASE_SEED + run
+    nn_output_size = controller_output_size()
+    num_weights = INPUT_SIZE * HIDDEN_SIZE + HIDDEN_SIZE * nn_output_size
+
+    for run in args.runs:
+        seed = BASE_SEED + run - 1
         set_seed(seed)
-        initial = Population([])
 
-        nn_output_size = controller_output_size()
-        num_weights = INPUT_SIZE * HIDDEN_SIZE + HIDDEN_SIZE * nn_output_size
+        if args.algorithm == "random":
+            this_run, best_genotype = run_random_search(run, num_weights)
+        else:
+            this_run, best_genotype = run_ea(
+                run, num_weights, nn_output_size, args.crossover, label
+            )
 
-        for _ in range(POPULATION_SIZE):
-            ind = Individual()
-            ind.genotype = RNG.normal(loc=0.0, scale=0.5, size=num_weights).tolist()
-            initial.append(ind)
-        initial = evaluate(initial)
+        pd.DataFrame(this_run).to_csv(output_dir / f"run_{run}.csv", index=False)
+        np.savetxt(output_dir / f"best_genotype_run_{run}.txt", np.asarray(best_genotype))
 
-        this_run = []
-        best_so_far = initial.best(sort="min", attribute="fitness_", n=1)[0].fitness_
-
-        initial_stats = get_stats(initial)
-
-        this_run.append(
-            {
-                "run": run + 1,
-                "generation": 0,
-                "best_fitness": initial_stats["best_fitness"],
-                "mean_fitness": initial_stats["mean_fitness"],
-                "std_fitness": initial_stats["std_fitness"],
-                "best_so_far": best_so_far
-            }
-        )
-
-        ea = EA(
-            initial,
-            [
-                EAOperation(parent_selection),
-                EAOperation(crossover, controller_output_size=nn_output_size, crossover_type=args.crossover),
-                EAOperation(mutate, controller_output_size=nn_output_size),
-                EAOperation(evaluate),
-                EAOperation(survivor_selection),
-                EAOperation(log_stats, this_run=this_run, run=run),
-            ],
-            num_steps=NUM_GENERATIONS,
-            is_maximisation=False
-        )
-        ea.run()
-
-        all_results.extend(this_run)
-
-        # Save the best individual's genotype to a file 
-        best_individual = ea.get_solution('best', only_alive=True)
-        output_dir = HERE / "outputs"
-        output_dir.mkdir(parents=True, exist_ok=True)
-        with (output_dir / "best_phenotype.txt").open("w") as phenotype_file:
-            np.savetxt(phenotype_file, np.asarray(best_individual.genotype))
-
-
-    df = pd.DataFrame(all_results)
-    df.to_csv(HERE / "outputs" / f"dataset_{args.crossover}.csv", index=False)
-    create_plot(args.crossover)
-
+    create_plot()
 
 
 

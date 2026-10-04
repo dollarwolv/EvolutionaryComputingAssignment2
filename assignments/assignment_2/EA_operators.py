@@ -6,7 +6,7 @@ from ariel.ec import Population, Individual
 
 def mutate_weights(
     weights: list[npt.NDArray[np.float64]],
-    sigma: float = 0.2,
+    sigma: float = MUTATION_SIGMA,
     mutation_prob: float = MUTATION_PROBABILITY,
 ) -> list[npt.NDArray[np.float64]]:
     """
@@ -36,7 +36,7 @@ def mutate_weights(
 def mutate(
         population: Population,
         controller_output_size: int,
-        sigma: float = 0.2,
+        sigma: float = MUTATION_SIGMA,
         mutation_prob: float = MUTATION_PROBABILITY,
 ) -> Population:
     for ind in population.where(lambda ind: bool(ind.tags.get("mutate", False))):
@@ -64,12 +64,14 @@ def tournament_selection(
     return genotypes[best_idx]
 
 def parent_selection(population: Population) -> Population:
+    for ind in population:
+        ind.tags = {"selected": False}
     shuffled = population.shuffle()
     for idx in range(0, len(shuffled) - 1, 2):
         ind_a = shuffled[idx]
         ind_b = shuffled[idx + 1]
         if ind_a.fitness_ is not None and ind_b.fitness_ is not None:
-            if ind_a.fitness_ >= ind_b.fitness_:
+            if ind_a.fitness_ <= ind_b.fitness_:
                 ind_a.tags = {"selected": True}
                 ind_b.tags = {"selected": False}
             else:
@@ -236,9 +238,9 @@ def survivor_selection(population: Population) -> Population:
             break
         ind_a = shuffled[idx]
         ind_b = shuffled[idx + 1]
-        if (ind_a.fitness_ or 0.0) >= (ind_b.fitness_ or 0.0):
-            ind_b.alive = False
-        else:
+        if ind_a.fitness_ >= ind_b.fitness_:
             ind_a.alive = False
+        else:
+            ind_b.alive = False
         alive_count -= 1
     return population
