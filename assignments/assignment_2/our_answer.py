@@ -9,20 +9,19 @@ import torch
 import random
 import pandas as pd
 
-
 # Local libraries (ARIEL)
 from ariel import console
 from ariel.body_phenotypes.robogen_lite.modules.core import CoreModule
 from ariel.ec import Population, Individual, EA, EAOperation
 from ariel.ec import set_seed as ariel_set_seed
 from ariel.simulation.environments import SimpleFlatWorld
-from ariel.body_phenotypes.robogen_lite.prebuilt_robots.john_set import  spider_8
+from ariel.body_phenotypes.robogen_lite.prebuilt_robots.john_set import spider_8
 from ariel.utils.renderers import single_frame_renderer, video_renderer
 from ariel.utils.runners import simple_runner
 from ariel.utils.video_recorder import VideoRecorder
 
 from parameters import *
-from helpers import genotype_to_weights
+from helpers import genotype_to_weights, has_plateaued
 from EA_operators import parent_selection, crossover, mutate, survivor_selection
 from plot_results import create_plot
 
@@ -37,7 +36,9 @@ def set_seed(seed: int) -> None:
     torch.manual_seed(seed)
     ariel_set_seed(seed)
 
+
 HERE = Path(__file__).parent
+
 
 # ============================================================================ #
 #  1. THE BODY AND THE WORLD
@@ -45,6 +46,7 @@ HERE = Path(__file__).parent
 def build_world() -> SimpleFlatWorld:
     """Create the environment the robot lives in."""
     return SimpleFlatWorld()
+
 
 def build_robot() -> CoreModule:
     """Create the robot body.
@@ -61,6 +63,7 @@ def build_robot() -> CoreModule:
     FIXED within an experiment.
     """
     return spider_8()
+
 
 # ============================================================================ #
 #  2. THE CONTROLLER CONTRACT
@@ -135,12 +138,14 @@ def nn_controller(
     # --- RESCALE TO THE HINGE RANGE --------------------------------------- #
     return outputs * (np.pi / 2)  # in [-pi/2, pi/2]
 
+
 # ============================================================================ #
 #  3. POSITION AND FITNESS
 # ============================================================================ #
 def get_core_position(data: mj.MjData) -> npt.NDArray[np.float64]:
     """Return the robot core's current (x, y, z) world position."""
     return np.asarray(data.qpos[0:3]).copy()
+
 
 def fitness_function(
     initial_position: npt.NDArray[np.float64],
@@ -159,17 +164,18 @@ def fitness_function(
 
     start_dist = np.linalg.norm(initial_position[:2] - target[:2])
     end_dist = np.linalg.norm(final_position[:2] - target[:2])
-    score = end_dist - start_dist                      # part 1
+    score = end_dist - start_dist  # part 1
 
-    if time_to_target is not None:                     # part 2
+    if time_to_target is not None:  # part 2
         score += time_to_target / SIM_DURATION
     else:
         score += 1.0
 
-    if fell:                                           # part 3
+    if fell:  # part 3
         score += 10.0
 
     return float(score)
+
 
 # ============================================================================ #
 #  4. RUNNING ONE EVALUATION
@@ -226,8 +232,6 @@ def run_experiment(
     def control_callback(m: mj.MjModel, d: mj.MjData) -> None:
         """Compute and apply actions; MuJoCo calls this every physics step."""
         actions = nn_controller(m, d, weights)
-
-       
 
         # Has the robot tipped over?
         qx, qy = d.qpos[4], d.qpos[5]
@@ -287,7 +291,7 @@ def run_experiment(
 
     fitness = fitness_function(
         initial_position, final_position, log["fell"], log["time_to_target"]
-)
+    )
     # console.log(f"start  : {np.round(initial_position, 3)}")
     # console.log(f"end    : {np.round(final_position, 3)}")
     # console.log(f"target : {np.round(TARGET_POSITION, 3)}")
@@ -295,10 +299,12 @@ def run_experiment(
 
     return fitness
 
+
 def evaluate(population: Population) -> Population:
     for ind in population.unevaluated:
         ind.fitness = run_experiment(ind.genotype, mode="simple")
     return population
+
 
 def controller_output_size() -> int:
     """Return the output_size of the controller."""
@@ -314,6 +320,7 @@ def controller_output_size() -> int:
     output_size = model.nu
 
     return output_size
+
 
 # Each generation, binary tournaments pick POPULATION_SIZE // 2 parents, which
 # are paired up and produce 2 children per pair - so this many evaluations/gen.
@@ -346,7 +353,7 @@ def make_record(
     best_so_far = stats["best_fitness"]
     if previous is not None:
         best_so_far = min(best_so_far, previous["best_so_far"])
-        
+
     return {
         "run": run,
         "generation": generation,
@@ -383,18 +390,27 @@ def run_ea(
         initial,
         [
             EAOperation(parent_selection),
-            EAOperation(crossover, controller_output_size=nn_output_size, crossover_type=crossover_type),
+            EAOperation(
+                crossover,
+                controller_output_size=nn_output_size,
+                crossover_type=crossover_type,
+            ),
             EAOperation(mutate, controller_output_size=nn_output_size),
             EAOperation(evaluate),
             EAOperation(survivor_selection),
             EAOperation(log_stats, this_run=this_run, run=run),
         ],
-        num_steps=NUM_GENERATIONS,
         is_maximisation=False,
         # one database per run, so runs in parallel terminals don't clash
         db_file_path=HERE / "__data__" / f"{label}_run_{run}.db",
     )
-    ea.run()
+
+    while not has_plateaued([record["best_so_far"] for record in this_run]):
+        ea.step()
+
+    console.log(
+        f"Run {run} reached a plateau at generation " f"{this_run[-1]['generation']}."
+    )
 
     best_individual = ea.get_solution("best", only_alive=True)
     return this_run, best_individual.genotype
@@ -406,26 +422,41 @@ def run_random_search(run: int, num_weights: int) -> tuple[list, list]:
     Generation 0 samples POPULATION_SIZE controllers, every later "generation"
     samples OFFSPRING_PER_GENERATION new ones, exactly like the EA.
     """
-    batch = evaluate(Population([new_individual(num_weights) for _ in range(POPULATION_SIZE)]))
+    batch = evaluate(
+        Population([new_individual(num_weights) for _ in range(POPULATION_SIZE)])
+    )
     this_run = [make_record(run, 0, get_stats(batch), None)]
     best = batch.best(sort="min", attribute="fitness_", n=1)[0]
 
-    for generation in range(1, NUM_GENERATIONS + 1):
+    generation = 0
+    while not has_plateaued([record["best_so_far"] for record in this_run]):
+        generation += 1
         batch = evaluate(
-            Population([new_individual(num_weights) for _ in range(OFFSPRING_PER_GENERATION)])
+            Population(
+                [new_individual(num_weights) for _ in range(OFFSPRING_PER_GENERATION)]
+            )
         )
         this_run.append(make_record(run, generation, get_stats(batch), this_run[-1]))
         batch_best = batch.best(sort="min", attribute="fitness_", n=1)[0]
         if batch_best.fitness_ < best.fitness_:
             best = batch_best
 
+    console.log(
+        f"Run {run} reached a plateau at generation " f"{this_run[-1]['generation']}."
+    )
+
     return this_run, best.genotype
 
 
 def parse_args() -> argparse.Namespace:
-    p = argparse.ArgumentParser(description="Brain Evolution", formatter_class=argparse.RawDescriptionHelpFormatter)
+    p = argparse.ArgumentParser(
+        description="Brain Evolution",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
     p.add_argument("--algorithm", choices=["ea", "random"], default="ea")
-    p.add_argument("--crossover", choices=["uniform", "neuron_block"], default="uniform")
+    p.add_argument(
+        "--crossover", choices=["uniform", "neuron_block"], default="uniform"
+    )
     p.add_argument(
         "--runs",
         type=int,
@@ -436,6 +467,7 @@ def parse_args() -> argparse.Namespace:
     )
     args = p.parse_args()
     return args
+
 
 def main() -> None:
     args = parse_args()
@@ -459,10 +491,11 @@ def main() -> None:
             )
 
         pd.DataFrame(this_run).to_csv(output_dir / f"run_{run}.csv", index=False)
-        np.savetxt(output_dir / f"best_genotype_run_{run}.txt", np.asarray(best_genotype))
+        np.savetxt(
+            output_dir / f"best_genotype_run_{run}.txt", np.asarray(best_genotype)
+        )
 
     create_plot()
-
 
 
 if __name__ == "__main__":

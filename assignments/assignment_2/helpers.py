@@ -3,6 +3,32 @@ import numpy.typing as npt
 from parameters import *
 
 
+def has_plateaued(
+    best_fitnesses: list[float],
+    patience: int = PLATEAU_PATIENCE,
+    min_delta: float = PLATEAU_MIN_DELTA,
+) -> bool:
+    """Return True when a minimisation run has stopped improving.
+
+    ``best_fitnesses`` must contain the best-so-far value after each
+    generation. Lower values are better in this assignment.
+    """
+    if patience <= 0:
+        raise ValueError("patience must be greater than zero")
+    if min_delta < 0:
+        raise ValueError("min_delta cannot be negative")
+
+    # We need one value before the patience window and one at its end.
+    if len(best_fitnesses) <= patience:
+        return False
+
+    old_best = best_fitnesses[-patience - 1]
+    current_best = best_fitnesses[-1]
+    improvement = old_best - current_best
+
+    return improvement <= min_delta
+
+
 def genotype_to_weights(
     genotype: npt.NDArray[np.float64],
     input_size: int,
