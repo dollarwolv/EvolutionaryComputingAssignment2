@@ -1,0 +1,2 @@
+──────────────────────────────── EA Initialized ────────────────────────────────
+[01:41:15] Run 6 reached a plateau at generation 743.          our_answer.py:422

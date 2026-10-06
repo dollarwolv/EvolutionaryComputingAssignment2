@@ -1,0 +1,7 @@
+[23:31:54] warning: Database at                                        ea.py:452
+           PosixPath("/Users/justindotzlaw/Documents/Master's                   
+           AI/Evolutionary Computing/Assignment                                 
+           2/EvolutionaryComputing2026/assignments/assignment_2/__data          
+           __/uniform_run_3.db") - handling: 'delete' -> deleting               
+──────────────────────────────── EA Initialized ────────────────────────────────
+[00:18:53] Run 3 reached a plateau at generation 607.          our_answer.py:422

@@ -1,0 +1,1 @@
+[01:28:10] Run 6 reached a plateau at generation 296.          our_answer.py:455

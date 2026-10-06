@@ -1,0 +1,2 @@
+──────────────────────────────── EA Initialized ────────────────────────────────
+[02:30:22] Run 8 reached a plateau at generation 720.          our_answer.py:422

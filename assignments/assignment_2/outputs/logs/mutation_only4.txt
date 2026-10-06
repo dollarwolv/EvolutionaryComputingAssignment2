@@ -1,0 +1,2 @@
+──────────────────────────────── EA Initialized ────────────────────────────────
+[01:31:08] Run 4 reached a plateau at generation 933.          our_answer.py:422
