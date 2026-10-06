@@ -63,10 +63,20 @@ def tournament_selection(
     best_idx = min(candidate_idxs, key=lambda i: fitnesses[i])
     return genotypes[best_idx]
 
+def shuffle(population: Population) -> Population:
+    """Shuffle with our seeded numpy RNG.
+
+    Don't use Population.shuffle(): it draws from Python's global `random`,
+    which `rich` (ariel's console output) also draws from whenever it prints,
+    so the order would depend on what got printed and runs wouldn't reproduce.
+    """
+    order = RNG.permutation(len(population))
+    return Population([population[int(i)] for i in order])
+
 def parent_selection(population: Population) -> Population:
     for ind in population:
-        ind.tags = {"selected": False, "mutate": False}
-    shuffled = population.shuffle()
+        ind.tags = {"selected": False}
+    shuffled = shuffle(population)
     for idx in range(0, len(shuffled) - 1, 2):
         ind_a = shuffled[idx]
         ind_b = shuffled[idx + 1]
@@ -247,7 +257,7 @@ def clone_selected_parents(population: Population) -> Population:
 
 
 def survivor_selection(population: Population) -> Population:
-    shuffled = population.alive.shuffle()
+    shuffled = shuffle(population.alive)
     alive_count = len(shuffled)
     for idx in range(0, len(shuffled) - 1, 2):
         if alive_count <= POPULATION_SIZE:

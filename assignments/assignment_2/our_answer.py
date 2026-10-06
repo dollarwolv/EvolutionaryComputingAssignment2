@@ -416,8 +416,11 @@ def run_ea(
         db_file_path=HERE / "__data__" / f"{label}_run_{run}.db",
     )
 
-    while not has_plateaued([record["best_so_far"] for record in this_run]):
+    generation = 0
+    while not has_plateaued([record["best_so_far"] for record in this_run]) and generation < MAX_GENERATIONS:
         ea.step()
+        generation += 1
+
 
     console.log(
         f"Run {run} reached a plateau at generation " f"{this_run[-1]['generation']}."
@@ -440,7 +443,7 @@ def run_random_search(run: int, num_weights: int) -> tuple[list, list]:
     best = batch.best(sort="min", attribute="fitness_", n=1)[0]
 
     generation = 0
-    while not has_plateaued([record["best_so_far"] for record in this_run]):
+    while not has_plateaued([record["best_so_far"] for record in this_run]) and generation < MAX_GENERATIONS:
         generation += 1
         batch = evaluate(
             Population(
